@@ -287,6 +287,7 @@ we_grid = np.linspace(0.05, 2.0, 450)
 we = 0.5 * (we_grid[:-1] + we_grid[1:])
 
 resultados = []
+espectros_resp = {}
 
 for nombre, d in escenarios.items():
     punto = nombre.split(" - ")[0]
@@ -356,7 +357,34 @@ for nombre, d in escenarios.items():
         ax.grid(True, which="minor", alpha=0.15, ls=":")
         plt.tight_layout()
         plt.savefig(f"step3_resp_{slug_esc}_{dof_slug}.png", dpi=200)
+        plt.close(fig)
+
+    espectros_resp[nombre] = (S_resp_h, S_resp_p, S_resp_r)
+
+for punto, esc_list, out_name in [
+    ("Punto 1", ["P1 - Mar Medio", "P1 - Mar Extremo"], "step3_espectros_respuesta_p1.png"),
+    ("Punto 2", ["P2 - Mar Medio", "P2 - Mar Extremo"], "step3_espectros_respuesta_p2.png"),
+]:
+    fig, axes = plt.subplots(2, 3, figsize=(15, 8), sharex=True)
+    for row_idx, esc in enumerate(esc_list):
+        S_h, S_p, S_r = espectros_resp[esc]
+        for col_idx, (S_resp, dof_name, ylabel, color) in enumerate([
+            (S_h, "Heave", "S_z [m²·s/rad]",   "#9467bd"),
+            (S_p, "Pitch", "S_θ [deg²·s/rad]", "#2ca02c"),
+            (S_r, "Roll",  "S_φ [deg²·s/rad]", "#ff7f0e"),
+        ]):
+            ax = axes[row_idx, col_idx]
+            ax.plot(we, S_resp, color=color, lw=1.8)
+            ax.fill_between(we, S_resp, color=color, alpha=0.2)
+            ax.set_title(f"{esc} - {dof_name}", fontsize=11)
+            ax.set_ylabel(ylabel, fontsize=10)
+            ax.set_xlim(0.0, 1.6)
+            ax.grid(True, alpha=0.3)
+            if row_idx == 1:
+                ax.set_xlabel("Frecuencia de encuentro ωe [rad/s]", fontsize=10)
+    plt.tight_layout()
+    plt.savefig(out_name, dpi=200, bbox_inches="tight")
+    plt.close(fig)
 
 df_res = pd.DataFrame(resultados)
 print(df_res.to_string(index=False))
-plt.show()
