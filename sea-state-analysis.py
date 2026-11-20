@@ -107,9 +107,8 @@ we_grid = np.linspace(0.05, 2.2, 450)
 we_centers = 0.5 * (we_grid[:-1] + we_grid[1:])
 
 espectros_encuentro = {}
-fig, axes = plt.subplots(2, 2, figsize=(12, 8))
 
-for idx, (nombre, d) in enumerate(escenarios.items()):
+for nombre, d in escenarios.items():
     punto = nombre.split(" - ")[0]
     rumbo = rumbos[punto]
     
@@ -127,19 +126,31 @@ for idx, (nombre, d) in enumerate(escenarios.items()):
     S_we = S_we_hist / np.diff(we_grid)
     
     espectros_encuentro[nombre] = {"we": we_centers, "S_we": S_we, "mu": mu_deg}
-    
-    ax = axes[idx // 2, idx % 2]
-    ax.plot(w_fine, S_w, label=f"S(ω) Fijo (Hm0={d['Hm0']:.4f} m)", color="#1f77b4", lw=1.8)
-    ax.plot(we_centers, S_we, label=f"S(ωe) Encuentro (μ={mu_deg:.4f}°, U={V_kn:.0f} kn)", color="#d62728", ls="--", lw=1.8)
-    ax.set_title(f"{nombre} (Tp={d['Tp']:.4f} s, Dir={d['Dir']:.4f}°)")
-    ax.set_xlabel("Frecuencia angular [rad/s]")
-    ax.set_ylabel("Densidad espectral [m²·s/rad]")
-    ax.set_xlim(0, 2.2)
-    ax.grid(True, alpha=0.3)
-    ax.legend(fontsize=8.5)
 
-plt.tight_layout()
-plt.savefig("step2_jonswap_encuentro.png", dpi=150)
+    # Escala automática según la zona con energía significativa
+    y_max = max(float(np.max(S_w)), float(np.max(S_we)))
+    umbral = 0.005 * y_max
+    w_activos = w_fine[S_w > umbral]
+    we_activos = we_centers[S_we > umbral]
+    x_min = max(0.0, min(float(w_activos[0]), float(we_activos[0])) - 0.15)
+    x_max = min(2.2, max(float(w_activos[-1]), float(we_activos[-1])) + 0.15)
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ax.plot(w_fine, S_w, label=f"S(ω) Fijo (Hm0={d['Hm0']:.4f} m)", color="#1f77b4", lw=2.0)
+    ax.plot(we_centers, S_we, label=f"S(ωe) Encuentro (μ={mu_deg:.2f}°, U={V_kn:.0f} kn)", color="#d62728", ls="--", lw=2.0)
+    ax.set_title(f"{nombre} (Tp={d['Tp']:.4f} s, Dir={d['Dir']:.4f}°)", fontsize=11.5, fontweight="bold")
+    ax.set_xlabel("Frecuencia angular [rad/s]", fontsize=10.5)
+    ax.set_ylabel("Densidad espectral [m²·s/rad]", fontsize=10.5)
+    ax.set_xlim(x_min, x_max)
+    ax.set_ylim(0, y_max * 1.12)
+    ax.minorticks_on()
+    ax.grid(True, which="major", alpha=0.35)
+    ax.grid(True, which="minor", alpha=0.15, ls=":")
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.15), ncol=2, fontsize=9, frameon=True)
+
+    slug = nombre.lower().replace(" - ", "_").replace(" ", "_")
+    plt.tight_layout()
+    plt.savefig(f"step2_jonswap_{slug}.png", dpi=200, bbox_inches="tight")
 
 
 # RAO
@@ -183,12 +194,11 @@ C44 = Delta * GMT
 wn_roll = np.sqrt(C44 / (I44 + A44))
 zeta_roll = 0.08
 
-# 2. FUNCIÓN PARA CALCULAR LOS RAOs (|H(we)|^2)
+
 def calc_raos(we, mu_deg):
     mu = np.deg2rad(mu_deg)
     k = we**2 / g  # Número de onda
     
-    # Efecto filtro del casco según eslora y manga (difracción/Smith)
     arg_L = np.maximum(0.5 * k * L * np.abs(np.cos(mu)), 1e-6)
     f_L = np.abs(np.sin(arg_L) / arg_L)
     arg_B = np.maximum(0.5 * k * B * np.abs(np.sin(mu)), 1e-6)
@@ -212,8 +222,48 @@ def calc_raos(we, mu_deg):
     
     return RAO_heave, RAO_pitch, RAO_roll
 
-# 3. ESPECTROS JONSWAP Y ESPECTROS DE RESPUESTA
-U = 18.0 * 0.514444  # Velocidad del buque: 18 nudos -> 9.26 m/s
+# 1. Verificación asintótica de RAOs en baja frecuencia (we -> 0)
+rh0, rp0, rr0 = calc_raos(np.array([1e-4]), 128.9)
+print(f"Check RAO(we->0): Heave = {rh0[0]:.4f} (esperado: 1.0) | Pitch = {rp0[0]:.2e} (esperado: 0)")
+
+# 2. Gráficas individuales de los RAOs bien escaladas para el Punto 2 del Assignment
+we_plot = np.linspace(0.01, 1.4, 2000)
+raos_mu = [
+    (128.9, "P1 Extremo (μ=128.9°)", "#1f77b4"),
+    (72.7,  "P2 Extremo (μ=72.7°)",  "#ff7f0e"),
+]
+rao_configs = [
+    ("Heave", "RAO Heave |H₃(ωe)|²", "[m²/m²]",   0, wn_heave, (0.0, 1.3), "step2_rao_heave.png"),
+    ("Pitch", "RAO Pitch |H₅(ωe)|²", "[deg²/m²]", 1, wn_pitch, (0.0, 1.2), "step2_rao_pitch.png"),
+    ("Roll",  "RAO Roll |H₄(ωe)|²",  "[deg²/m²]", 2, wn_roll,  (0.0, 0.5), "step2_rao_roll.png"),
+]
+
+# Precalcular RAOs para cada ángulo de encuentro
+raos_por_mu = [(etiqueta, color, calc_raos(we_plot, mu_val)) for mu_val, etiqueta, color in raos_mu]
+
+for nombre_dof, titulo, unidades, idx_dof, wn_dof, xlim, filename in rao_configs:
+    fig, ax = plt.subplots(figsize=(8, 5))
+    y_max = 0.0
+    for etiqueta, color, rao_tuple in raos_por_mu:
+        y = rao_tuple[idx_dof]
+        ax.plot(we_plot, y, lw=2.0, color=color, label=etiqueta)
+        y_max = max(y_max, float(np.max(y[we_plot <= xlim[1]])))
+
+    ax.axvline(wn_dof, color="#555555", ls="--", lw=1.3, label=f"ωₙ {nombre_dof} = {wn_dof:.3f} rad/s")
+    ax.set_title(f"{titulo} {unidades}", fontsize=12, fontweight="bold")
+    ax.set_xlabel("Frecuencia de encuentro ωe [rad/s]", fontsize=10.5)
+    ax.set_ylabel(f"|H(ωe)|² {unidades}", fontsize=10.5)
+    ax.set_xlim(*xlim)
+    ax.set_ylim(0, y_max * 1.12)
+    ax.minorticks_on()
+    ax.grid(True, which="major", alpha=0.35)
+    ax.grid(True, which="minor", alpha=0.15, ls=":")
+    ax.legend(fontsize=9.5, frameon=True)
+    plt.tight_layout()
+    plt.savefig(filename, dpi=200)
+
+# ESPECTROS JONSWAP Y ESPECTROS DE RESPUESTA
+U = 18.0 * 0.514444 
 escenarios = {
     "P1 - Mar Medio":   {"Hm0": 1.31, "Tp": 6.35,  "Dir": 302.8},
     "P1 - Mar Extremo": {"Hm0": 6.19, "Tp": 10.76, "Dir": 333.9},
@@ -237,9 +287,8 @@ we_grid = np.linspace(0.05, 2.0, 450)
 we = 0.5 * (we_grid[:-1] + we_grid[1:])
 
 resultados = []
-fig, axes = plt.subplots(4, 3, figsize=(14, 13), sharex=True)
 
-for row, (nombre, d) in enumerate(escenarios.items()):
+for nombre, d in escenarios.items():
     punto = nombre.split(" - ")[0]
     rumbo = rumbos[punto]
     dir_prop = (d["Dir"] + 180.0) % 360.0
@@ -282,24 +331,31 @@ for row, (nombre, d) in enumerate(escenarios.items()):
         "Roll sig [°]": round(2 * np.sqrt(m0_r), 2),
     })
     
-    # Gráficas de los espectros de respuesta
-    for col, (S_resp, titulo, ylabel, color) in enumerate([
-        (S_resp_h, f"{nombre} - Heave", "S_z [m²·s/rad]", "#9467bd"),
-        (S_resp_p, f"{nombre} - Pitch", "S_θ [deg²·s/rad]", "#2ca02c"),
-        (S_resp_r, f"{nombre} - Roll",  "S_φ [deg²·s/rad]", "#ff7f0e"),
-    ]):
-        ax = axes[row, col]
-        ax.plot(we, S_resp, color=color, lw=1.8)
-        ax.fill_between(we, S_resp, color=color, alpha=0.2)
-        ax.set_title(titulo, fontsize=9.5)
-        ax.set_ylabel(ylabel, fontsize=8.5)
-        ax.set_xlim(0, 1.6)
-        ax.grid(True, alpha=0.3)
-        if row == 3:
-            ax.set_xlabel("Frecuencia de encuentro ωe [rad/s]", fontsize=9)
+    # Gráficas individuales de los espectros de respuesta bien escaladas
+    slug_esc = nombre.lower().replace(" - ", "_").replace(" ", "_")
+    for dof_slug, S_resp, titulo, ylabel, color in [
+        ("heave", S_resp_h, f"{nombre} - Heave", "S_z [m²·s/rad]",   "#9467bd"),
+        ("pitch", S_resp_p, f"{nombre} - Pitch", "S_θ [deg²·s/rad]", "#2ca02c"),
+        ("roll",  S_resp_r, f"{nombre} - Roll",  "S_φ [deg²·s/rad]", "#ff7f0e"),
+    ]:
+        y_max = float(np.max(S_resp))
+        activos = we[S_resp > 0.005 * y_max] if y_max > 0 else we
+        x_min = max(0.0, float(activos[0]) - 0.12)
+        x_max = min(1.6, float(activos[-1]) + 0.12)
 
-plt.tight_layout()
-plt.savefig("step3_espectros_respuesta.png", dpi=150)
+        fig, ax = plt.subplots(figsize=(8, 4.8))
+        ax.plot(we, S_resp, color=color, lw=2.0)
+        ax.fill_between(we, S_resp, color=color, alpha=0.2)
+        ax.set_title(titulo, fontsize=11.5, fontweight="bold")
+        ax.set_xlabel("Frecuencia de encuentro ωe [rad/s]", fontsize=10.5)
+        ax.set_ylabel(ylabel, fontsize=10.5)
+        ax.set_xlim(x_min, x_max)
+        ax.set_ylim(0, y_max * 1.12 if y_max > 0 else 1.0)
+        ax.minorticks_on()
+        ax.grid(True, which="major", alpha=0.35)
+        ax.grid(True, which="minor", alpha=0.15, ls=":")
+        plt.tight_layout()
+        plt.savefig(f"step3_resp_{slug_esc}_{dof_slug}.png", dpi=200)
 
 df_res = pd.DataFrame(resultados)
 print(df_res.to_string(index=False))
